@@ -27,6 +27,9 @@ hide_streamlit_style = """
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
+# Get the Hugging Face API key from Streamlit secrets
+HUGGING_FACE_API_KEY = st.secrets["HUGGING_FACE_KEY"]
+
 # Streamlit sidebar setup
 with st.sidebar:
     st.title("Your BRD Documents")
@@ -121,7 +124,7 @@ with tab1:
             st.write(f"Top 3 similar results: {top_k_idx}")
 
             # Use Hugging Face's pipeline for question answering (or other NLP tasks)
-            qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
+            qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2", use_auth_token=HUGGING_FACE_API_KEY)
             response = qa_pipeline(question=prompt_message, context=text)
             st.write(response['answer'])
 
