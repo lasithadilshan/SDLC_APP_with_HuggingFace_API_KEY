@@ -17,7 +17,11 @@ st.set_page_config(
     page_icon="📄"
 )
 
-# Get API key from Streamlit secrets
+# Check for API Key
+if "HUGGINGFACE_API_KEY" not in st.secrets:
+    st.error("API key not found! Please add 'HUGGINGFACE_API_KEY' in Streamlit Secrets.")
+    st.stop()
+
 HUGGINGFACE_API_KEY = st.secrets["HUGGINGFACE_API_KEY"]
 
 # Sidebar for file upload
@@ -31,20 +35,18 @@ with st.sidebar:
 # Function to extract text from various file types
 @st.cache_resource
 def extract_text_from_file(file):
-    """Extracts text based on file type, with caching for faster retrieval."""
+    """Extracts text based on file type."""
     text = ""
     file_ext = os.path.splitext(file.name)[1].lower()
 
     try:
         if file_ext == ".pdf":
             pdf_reader = PdfReader(file)
-            for page in pdf_reader.pages:
-                text += page.extract_text() or ""
+            text = "\n".join([page.extract_text() or "" for page in pdf_reader.pages])
 
         elif file_ext == ".docx":
             doc = Document(file)
-            for para in doc.paragraphs:
-                text += para.text + "\n"
+            text = "\n".join([para.text for para in doc.paragraphs])
 
         elif file_ext == ".txt":
             text = file.read().decode("utf-8")
@@ -55,10 +57,7 @@ def extract_text_from_file(file):
 
         elif file_ext in [".pptx", ".ppt"]:
             ppt = pptx.Presentation(file)
-            for slide in ppt.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text += shape.text + "\n"
+            text = "\n".join([shape.text for slide in ppt.slides for shape in slide.shapes if hasattr(shape, "text")])
     
     except Exception as e:
         st.error(f"Error extracting text: {e}")
@@ -79,8 +78,7 @@ def create_vector_store(text):
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n"],
         chunk_size=800,
-        chunk_overlap=50,
-        length_function=len
+        chunk_overlap=50
     )
     chunks = text_splitter.split_text(text)
     
@@ -149,11 +147,7 @@ with tab2:
 
     if st.button("Generate Test Cases"):
         if user_story_text and vector_store:
-            test_case_prompt = (
-                "You are a senior QA engineer. Convert the following user story into test cases "
-                "covering functional and edge cases:\n\n" + user_story_text
-            )
-            response = qa_chain.invoke({"query": test_case_prompt})
+            response = qa_chain.invoke({"query": f"Convert this user story into test cases: {user_story_text}"})
             st.write(response["result"])
         else:
             st.warning("Please enter a user story.")
@@ -165,10 +159,7 @@ with tab3:
 
     if st.button("Generate Cucumber Script"):
         if test_case_text and vector_store:
-            cucumber_prompt = (
-                "Convert the following test case into a Cucumber script using Gherkin syntax:\n\n" + test_case_text
-            )
-            response = qa_chain.invoke({"query": cucumber_prompt})
+            response = qa_chain.invoke({"query": f"Convert this test case into a Cucumber script: {test_case_text}"})
             st.write(response["result"])
         else:
             st.warning("Please enter a test case.")
@@ -180,10 +171,7 @@ with tab4:
 
     if st.button("Generate Selenium Script"):
         if selenium_test_case and vector_store:
-            selenium_prompt = (
-                "Convert the following test case into a Python Selenium WebDriver script:\n\n" + selenium_test_case
-            )
-            response = qa_chain.invoke({"query": selenium_prompt})
+            response = qa_chain.invoke({"query": f"Convert this test case into a Python Selenium script: {selenium_test_case}"})
             st.write(response["result"])
         else:
             st.warning("Please enter a test case.")
