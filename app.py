@@ -28,7 +28,7 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # Get the Hugging Face API key from Streamlit secrets
-HUGGING_FACE_API_KEY = st.secrets["HUGGING_FACE_API_KEY"]
+HUGGINGFACE_API_KEY = st.secrets["HUGGINGFACE_API_KEY"]
 
 # Streamlit sidebar setup
 with st.sidebar:
