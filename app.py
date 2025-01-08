@@ -9,6 +9,7 @@ from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer
 from datasets import Dataset
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+from app_secret import HUGGINGFACE_API_KEY
 
 st.set_page_config(
     page_title="SDLC Automate APP",
