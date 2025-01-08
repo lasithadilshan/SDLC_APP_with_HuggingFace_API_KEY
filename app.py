@@ -5,10 +5,11 @@ import pptx
 import pandas as pd
 import os
 import time
-from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer
+from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer, AutoModel
 from datasets import Dataset
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import torch
 
 st.set_page_config(
     page_title="SDLC Automate APP",
@@ -81,13 +82,23 @@ def process_uploaded_file(uploaded_file):
 # Function to create embeddings using Hugging Face model
 @st.cache_resource
 def create_embeddings(text):
-    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-    model = AutoModelForQuestionAnswering.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    """Creates embeddings using a Sentence Transformer model."""
+    model_name = "sentence-transformers/all-MiniLM-L6-v2"  # Use a model designed for embeddings
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
     
-    # Tokenize and encode the text to get embeddings
-    inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512)
-    embeddings = model(**inputs).last_hidden_state.mean(dim=1).detach().numpy()
-    return embeddings
+    # Use `pooler_output` if available, else use mean of last_hidden_state
+    if hasattr(outputs, "pooler_output"):
+        embeddings = outputs.pooler_output
+    else:
+        embeddings = outputs.last_hidden_state.mean(dim=1)
+
+    return embeddings.detach().numpy()
 
 # Function for similarity search
 def similarity_search(query, embeddings, top_k=3):
