@@ -4,106 +4,129 @@ from docx import Document
 import pptx
 import pandas as pd
 import os
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
-from langchain_community.vectorstores import FAISS
-from transformers import pipeline
+import time
+from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer
+from datasets import Dataset
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 st.set_page_config(
     page_title="SDLC Automate APP",
     page_icon="images/favicon.png"
 )
 
+# Hide Streamlit branding, menu, and footer
 hide_streamlit_style = """
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    ._link_gzau3_10 {display: none;}
-    .stDeployButton {display: none !important;}
+    #MainMenu {visibility: hidden;} /* Hides the "Manage app" menu */
+    footer {visibility: hidden;} /* Hides the Streamlit footer */
+    header {visibility: hidden;} /* Hides the header */
+    ._link_gzau3_10 {display: none;} /* Hides "Hosted with Streamlit" */
+    .stDeployButton {display: none !important;} /* Hides the deploy button */
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-llm = pipeline("text-generation", model="mistralai/Mistral-7B-Instruct-v0.1")
-
+# Streamlit sidebar setup
 with st.sidebar:
     st.title("Your BRD Documents")
     uploaded_file = st.file_uploader("Upload a file to generate user stories", type=["pdf", "docx", "txt", "xlsx", "pptx"])
 
+# Function to extract text from various file types
+@st.cache_resource
 def extract_text_from_file(file):
+    """Extracts text based on file type, with caching for faster retrieval."""
     text = ""
     file_ext = os.path.splitext(file.name)[1].lower()
+
+    # Handle PDF files
     if file_ext == ".pdf":
         pdf_reader = PdfReader(file)
         for page in pdf_reader.pages:
-            text += page.extract_text() or ""
+            text += page.extract_text()
+
+    # Handle Word (.docx) files
     elif file_ext == ".docx":
         doc = Document(file)
         for para in doc.paragraphs:
             text += para.text + "\n"
+
+    # Handle text (.txt) files
     elif file_ext == ".txt":
         text = file.read().decode("utf-8")
+
+    # Handle Excel files (.xlsx, .xls)
     elif file_ext in [".xlsx", ".xls"]:
         df = pd.read_excel(file)
         text = df.to_string()
+
+    # Handle PowerPoint files (.pptx, .ppt)
     elif file_ext in [".pptx", ".ppt"]:
         ppt = pptx.Presentation(file)
         for slide in ppt.slides:
             for shape in slide.shapes:
                 if hasattr(shape, "text"):
                     text += shape.text + "\n"
+
     return text
 
-def create_vector_store(text):
-    text_splitter = RecursiveCharacterTextSplitter(
-        separators="\n",
-        chunk_size=800,
-        chunk_overlap=50,
-        length_function=len
-    )
-    chunks = text_splitter.split_text(text)
-    embeddings = [embedding_model.encode(chunk) for chunk in chunks]
-    return FAISS.from_texts(chunks, embedding_model)
+# Process the uploaded file and extract text for the vector store
+@st.cache_resource
+def process_uploaded_file(uploaded_file):
+    return extract_text_from_file(uploaded_file) if uploaded_file else ""
 
+# Function to create embeddings using Hugging Face model
+@st.cache_resource
+def create_embeddings(text):
+    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    model = AutoModelForQuestionAnswering.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    
+    # Tokenize and encode the text to get embeddings
+    inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512)
+    embeddings = model(**inputs).last_hidden_state.mean(dim=1).detach().numpy()
+    return embeddings
+
+# Function for similarity search
+def similarity_search(query, embeddings, top_k=3):
+    query_embedding = create_embeddings(query)
+    similarities = cosine_similarity(query_embedding, embeddings)
+    top_k_idx = np.argsort(similarities[0])[::-1][:top_k]
+    return top_k_idx
+
+# Streamlit app setup
 st.header("BRD to User Story, Test Case, Cucumber Script, and Selenium Script")
 
+# Set up tabs for different functionalities
 tab1, tab2, tab3, tab4 = st.tabs(["User Story Generation", "User Story to Test Case", "Test Case to Cucumber Script", "Test Case to Selenium Script"])
 
+# User Story Generation Tab
 with tab1:
+    start_time = time.time()
     if uploaded_file:
-        text = extract_text_from_file(uploaded_file)
+        text = process_uploaded_file(uploaded_file)
         if text:
-            vector_store = create_vector_store(text)
-            prompt_message = "Think of yourself as a senior business analyst. Read the BRD and write all possible user stories."
-            matches = vector_store.similarity_search(prompt_message, k=3)
-            response = llm(prompt_message, max_length=500, do_sample=True)[0]['generated_text']
-            st.write(response)
+            # Create embeddings for the document
+            embeddings = create_embeddings(text)
+
+            prompt_message = (
+                "Think of yourself as a senior business analyst. Your responsibility is to read the Business Requirement Document "
+                "and write the User Stories according to that BRD. Think step-by-step and write all possible user stories "
+                "for the Business Requirement Document."
+                "Make sure to give fully complete user stories."
+            )
+
+            # Perform similarity search
+            start_query_time = time.time()
+            top_k_idx = similarity_search(prompt_message, embeddings, top_k=3)
+            st.write(f"Top 3 similar results: {top_k_idx}")
+
+            # Use Hugging Face's pipeline for question answering (or other NLP tasks)
+            qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
+            response = qa_pipeline(question=prompt_message, context=text)
+            st.write(response['answer'])
+
+            # Display timing info for performance insights
+            st.write(f"Document loading time: {time.time() - start_time:.2f} seconds")
+            st.write(f"Query processing time: {time.time() - start_query_time:.2f} seconds")
     else:
         st.write("Please upload a BRD document in the sidebar to generate user stories.")
-
-with tab2:
-    user_story_text = st.text_area("Enter the user story text here to generate test cases:")
-    if st.button("Generate Test Cases"):
-        if user_story_text:
-            test_case_prompt = "Generate test cases for: " + user_story_text
-            response = llm(test_case_prompt, max_length=500, do_sample=True)[0]['generated_text']
-            st.write(response)
-
-with tab3:
-    test_case_text = st.text_area("Enter the test case text here to generate Cucumber script:")
-    if st.button("Generate Cucumber Script"):
-        if test_case_text:
-            cucumber_prompt = "Convert the following test case into a Cucumber script: " + test_case_text
-            response = llm(cucumber_prompt, max_length=500, do_sample=True)[0]['generated_text']
-            st.write(response)
-
-with tab4:
-    selenium_test_case_text = st.text_area("Enter the test case text here to generate Selenium script:")
-    if st.button("Generate Selenium Script"):
-        if selenium_test_case_text:
-            selenium_prompt = "Convert the following test case into a Selenium WebDriver script: " + selenium_test_case_text
-            response = llm(selenium_prompt, max_length=500, do_sample=True)[0]['generated_text']
-            st.write(response)
